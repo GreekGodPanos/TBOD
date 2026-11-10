@@ -1,0 +1,2028 @@
+if not game:IsLoaded() then
+	game.Loaded:Wait()
+end
+
+-- services (BTW GO TO CONFIG! enjoy and maybe even look at the misc section :D )
+local Players             = game:GetService("Players")
+local RunService          = game:GetService("RunService")
+local CoreGui             = game:GetService("CoreGui")
+local PathfindingService  = game:GetService("PathfindingService")
+local GuiService          = game:GetService("GuiService")
+local UserInputService    = game:GetService("UserInputService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local StarterGui          = game:GetService("StarterGui")
+local ReplicatedStorage   = game:GetService("ReplicatedStorage")
+local Lighting            = game:GetService("Lighting")
+local Workspace           = game:GetService("Workspace")
+local VirtualUser         = game:GetService("VirtualUser")
+
+local localPlayer = Players.LocalPlayer
+
+--  helpers
+local function colorSeq(...)
+	local keys = {}
+	for _, k in ipairs({...}) do
+		keys[#keys + 1] = ColorSequenceKeypoint.new(k[1], Color3.fromRGB(k[2], k[3], k[4]))
+	end
+	return ColorSequence.new(keys)
+end
+
+local function numSeq(...)
+	local keys = {}
+	for _, k in ipairs({...}) do
+		keys[#keys + 1] = NumberSequenceKeypoint.new(k[1], k[2])
+	end
+	return NumberSequence.new(keys)
+end
+
+local function recolorSequence(sequence, color)
+	local keys = {}
+	for _, k in ipairs(sequence.Keypoints) do
+		local c = k.Value
+		local whiteness = math.min(c.R, c.G, c.B)
+		local brightness = math.max(c.R, c.G, c.B)
+		local tinted = color:Lerp(Color3.new(1, 1, 1), whiteness)
+		keys[#keys + 1] = ColorSequenceKeypoint.new(k.Time, Color3.new(tinted.R * brightness, tinted.G * brightness, tinted.B * brightness))
+	end
+	return ColorSequence.new(keys)
+end
+
+local function parseColor(text)
+	text = (text:gsub("%s", ""))
+	if text == "" or text:lower() == "default" then return nil, true end
+	local hex = text:match("^#?(%x%x%x%x%x%x)$")
+	if hex then
+		return Color3.fromRGB(tonumber(hex:sub(1, 2), 16), tonumber(hex:sub(3, 4), 16), tonumber(hex:sub(5, 6), 16)), true
+	end
+	local r, g, b = text:match("^(%d+),(%d+),(%d+)$")
+	if r then
+		return Color3.fromRGB(math.clamp(tonumber(r), 0, 255), math.clamp(tonumber(g), 0, 255), math.clamp(tonumber(b), 0, 255)), true
+	end
+	return nil, false
+end
+
+local function colorToText(color)
+	if not color then return "default" end
+	return string.format("#%02X%02X%02X", math.floor(color.R * 255 + 0.5), math.floor(color.G * 255 + 0.5), math.floor(color.B * 255 + 0.5))
+end
+
+--  you've reached the CONFIG! good job! have fun and good luck on your tycoon :)
+local CONFIG = {
+	GuiName = "TycoonManagerGui",
+	Font    = Enum.Font.Arcade,
+
+	Colors = {
+		Background = Color3.fromRGB(15, 15, 18),
+		Panel      = Color3.fromRGB(25, 25, 30),
+		Header     = Color3.fromRGB(35, 35, 45),
+		Stroke     = Color3.fromRGB(35, 35, 45),
+		On         = Color3.fromRGB(60, 200, 120),
+		Accent     = Color3.fromRGB(60, 120, 200),
+		Danger     = Color3.fromRGB(255, 65, 65),
+		Text       = Color3.fromRGB(255, 255, 255),
+		TextDim    = Color3.fromRGB(180, 180, 180),
+		TextMuted  = Color3.fromRGB(200, 200, 200),
+		Eta        = Color3.fromRGB(0, 255, 255),
+	},
+
+	Window = {
+		Position        = UDim2.new(0, 0, 0, 0),
+		Size            = UDim2.new(0, 430, 0, 365),
+		MinimizedHeight = 30,
+		HeaderHeight    = 30,
+		PanelY          = 70,
+		PanelPadding    = 5, -- dont change this one, the gui will look like crap if you do.
+		ScrollFrameY    = 300,
+	},
+  
+
+  -- dont remove this or you will face consequences. you have been warned because if this doesnt exist, the script straight up breaks.
+
+    ------------------------------------------------------------------------------------------------------------------------------------------------------
+	["\x54\x69\x74\x6c\x65"] = { ["\x50\x72\x65\x66\x69\x78"] = "\x47\x55\x49\x5e\x34", ["\x54\x61\x67"] = "\x5b\x48\x61\x72\x75\x27\x73\x20\x54\x42\x4f\x44\x5e\x32\x5d\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x56\x45\x52\x53\x49\x4f\x4e\x3a\x32" },
+    ------------------------------------------------------------------------------------------------------------------------------------------------------
+
+	Movement = {
+		WalkSpeed      = 35,
+		JumpPower      = 60,
+		BoostThreshold = 16, -- velocity override fix, mainly done to prevent bugs lmao
+	},
+
+	Music = {
+		SoundId    = "rbxassetid://130454725364414",
+		Volume     = 0.1,  -- starting volume, 0 to 1 (this gets transferred to % so 0.5 = 50% volume)
+		Looped     = true,
+		MaxPercent = 100,  -- again, done to prevent bugs. you CAN increase it, but it MAY blow up your speakers or something, be careful <3
+	},
+
+	Intervals = {
+		MovementCheck   = 0.1,
+		RgbUpdate       = 0.01,
+		GradientSpin    = 0.03,
+		MerchantUpdate  = 0.1,
+		MerchantGate    = 1,
+		ShopUpdate      = 0.1,
+		MonitorPoll     = 1.2,
+		TextPoll        = 1.5,
+		AutoBuyCooldown = 0.125,
+		MerchantLocator = 0.1,
+	},
+
+	AntiAfk = {
+		Enabled        = true,
+		NotifyTitle    = "Simple AFK.",
+		NotifyText     = "i frikin work",
+		NotifyDuration = 30,
+	},
+
+	Rgb = {
+		CycleSeconds = 100,
+		DefaultSpeed = 1,
+		MinSpeed     = 0.1,
+		MaxSpeed     = 100,
+	},
+
+	Rebirth = {
+		EssencePhrase    = "your essence is capped",
+		EssenceScanCache = 0.1,
+		ConfirmDelay     = 2,
+		Cooldown         = 4,
+		TeleportDelay    = 3,
+		PlotSpawnOffset  = 6,
+		DefaultMode      = 2,
+		Modes = {
+			{ id = "Any",         text = "Rebirth Trigger: Both" },
+			{ id = "Essence",     text = "Essence Cap" },
+			{ id = "RebirthNoti", text = "Progress 100%" },
+		},
+		ObeliskPath = { "Obelisk", "RebirthButton", "Click" },
+		ManualTitle       = "Manual Rebirth",
+		ManualFailText    = "that dont work twin",
+		ManualFailSeconds = 3,
+	},
+
+	TrackedTexts = {
+		EssenceCappedTemp   = { "Players", localPlayer.Name, "PlayerGui", "System", "Notifications", "NotiHolder", "EssenceCappedTemp", "Pos", "Text" },
+		RebirthNotification = { "Players", localPlayer.Name, "PlayerGui", "System", "Notifications", "NotiHolder", "RebirthNotification", "Pos", "Text" },
+	},
+
+	Suffixes = { K = 1e3, M = 1e6, B = 1e9, T = 1e12, QA = 1e15, QI = 1e18, SX = 1e21, SP = 1e24, O = 1e27, N = 1e30, D = 1e33 },
+
+	Pathfinding = {
+		AgentRadius = 2.5, AgentHeight = 5, AgentCanJump = true, AgentCanClimb = true,
+		WaypointSpacing = 3, WaterCost = 20,
+		ReachDistance = 4.5, WaypointReach = 3.2, WaypointTimeout = 2.5,
+		JumpHeightThreshold = 3,   -- studs the button must be above you before jumping kicks in (try not to mess with this too much)
+		JumpInterval = 1,        -- seconds between jumps (try not to mess with this too much)
+		FallbackSeconds = 10,      -- teleport to the button if walking fails (try not to mess with this too much)
+		StuckDistance = 0.55, StuckTime = 0.5, StuckPush = 2.2, StuckLift = 1.2,
+	},
+
+	Guidelines = {
+		MaxDistance = 4000,
+		Color       = Color3.fromRGB(60, 200, 120),
+		Width       = 2,
+		Texture     = "rbxassetid://446111271",
+		TextureSpeed = 3,
+		TextureLength = 3,
+	},
+
+	AutoPickMinCards = 5,
+
+	MerchantLocator = {
+		MinY           = 30,
+		MaxDistance    = 4000,
+		Color          = Color3.fromRGB(77, 0, 201),
+	},
+
+
+
+
+
+
+
+	Aura = {
+		Text            = "THE SUPER SAIYAN",
+		OutlineColor    = Color3.fromRGB(255, 208, 0),
+		TextColor       = Color3.fromRGB(255, 238, 180),
+		StrokeColor     = Color3.fromRGB(25, 20, 5),
+		GlowStart       = Color3.fromRGB(120, 98, 0),
+		GlowPulseLow    = Color3.fromRGB(80, 65, 0),
+		GlowPulseHigh   = Color3.fromRGB(255, 208, 0),
+		InitialTextSize = 88,
+		BaseTextSize    = 34,
+		BobHeight       = 3, BobAmount = 0.1, BobSpeed = 1.4,
+		PulseSpeed      = 5, ScaleSpeed = 4,
+		MaxNameLength   = 30,
+		MinNameSize     = 8,
+		MaxNameSize     = 100,
+	},
+
+	Animations = {
+		idle1 = "rbxassetid://10921144709", idle2 = "rbxassetid://10921145797",
+		walk  = "rbxassetid://10921269718", run   = "rbxassetid://10921261968",
+		jump  = "rbxassetid://10921149743", fall  = "rbxassetid://10921148939",
+		climb = "rbxassetid://10921143404",
+	},
+
+	SSJ = {
+		Texture       = "rbxassetid://241594419",
+		BodyParts     = { "Head", "LeftHand", "RightHand", "LeftFoot", "RightFoot" },
+		SoulCount     = 25,
+		OrbitRadius   = 4.5,
+		OrbitSpeed    = 2.3,
+		DashChance    = 0.01,
+		DashDuration  = { 12, 22 },  -- hundredths of a second currently. i dont even know how this was made, a friend organized everything for me
+		DashRadius    = { 85, 115 }, -- percent of OrbitRadius
+		PersistDash   = false,       -- true lets dashes last their full duration
+		LightColor    = Color3.fromRGB(255, 230, 120),
+		LightBrightness = 0.7,
+		LightRange    = 4,
+		Orbits = {
+			{ axis = Vector3.new(1, 1, 0),  speed = 1,    offset = 0 },
+			{ axis = Vector3.new(-1, 1, 0), speed = 1.1,  offset = math.pi / 2 },
+			{ axis = Vector3.new(0, 1, 1),  speed = 0.9,  offset = math.pi },
+			{ axis = Vector3.new(1, 0, 1),  speed = 1.05, offset = math.pi * 1.5 },
+		},
+	},
+}
+
+local C = CONFIG.Colors
+
+--  shared state and cleanup
+local env = (getgenv and getgenv()) or _G
+
+if env.TycoonManagerCleanup then
+	pcall(env.TycoonManagerCleanup)
+end
+
+local oldGui = CoreGui:FindFirstChild(CONFIG.GuiName)
+if oldGui then oldGui:Destroy() end
+
+local running = true
+local connections = {}
+local cleanupHooks = {}
+
+local function track(connection)
+	connections[#connections + 1] = connection
+	return connection
+end
+
+local State = {
+	beamsEnabled       = false,
+	autoBuyEnabled     = false,
+	autoRebirthEnabled = false,
+	autoPickCardEnabled = true,
+	merchantLocatorEnabled = true,
+	usePathfind        = false,
+	walkSpeed          = CONFIG.Movement.WalkSpeed,
+	jumpPower          = CONFIG.Movement.JumpPower,
+	rebirthModeIndex   = CONFIG.Rebirth.DefaultMode,
+	isRebirthing       = false,
+	isTeleportingPlot  = false,
+	isCompleteRGB      = false,
+	isMinimized        = false,
+	activeTab          = "Stats",
+	nameText           = CONFIG.Aura.Text,
+	nameSize           = CONFIG.Aura.BaseTextSize,
+	colors             = { orbs = nil, aura = nil, light = nil, name = nil },
+	rgb                = { orbs = false, aura = false, light = false, name = false },
+	rgbSpeed           = CONFIG.Rgb.DefaultSpeed,
+	animations         = table.clone(CONFIG.Animations),
+}
+
+local nametag = {}
+
+local trackedTexts = {}
+
+--  some more helpers
+local function new(className, props, parent)
+	local inst = Instance.new(className)
+	for k, v in pairs(props) do inst[k] = v end
+	inst.Parent = parent
+	return inst
+end
+
+local function addCorner(parent, radius)
+	return new("UICorner", { CornerRadius = UDim.new(0, radius or 6) }, parent)
+end
+
+local function addStroke(parent, color, thickness)
+	return new("UIStroke", { Color = color or C.Stroke, Thickness = thickness or 1 }, parent)
+end
+
+local function onCharacter(callback)
+	if localPlayer.Character then task.spawn(callback, localPlayer.Character) end
+	track(localPlayer.CharacterAdded:Connect(callback))
+end
+
+local function resolvePath(pathParts)
+	local current = game
+	for _, name in ipairs(pathParts) do
+		current = current:FindFirstChild(name)
+		if not current then return nil end
+	end
+	return current
+end
+
+local function parseSuffixValue(str)
+	if not str then return 0 end
+	str = string.upper(string.gsub(str, "[%,%$%s]", ""))
+	local num, suffix = string.match(str, "([%d%.]+)(%a*)")
+	num = tonumber(num) or 0
+	local mult = suffix and CONFIG.Suffixes[suffix]
+	return mult and num * mult or num
+end
+
+local FORMAT_STEPS = { { 1e18, "Qi" }, { 1e15, "Qa" }, { 1e12, "T" }, { 1e9, "B" }, { 1e6, "M" }, { 1e3, "K" } }
+local function formatNumber(num)
+	for _, step in ipairs(FORMAT_STEPS) do
+		if num >= step[1] then return string.format("%.2f%s", num / step[1], step[2]) end
+	end
+	return string.format("%.0f", num)
+end
+
+local function parsePrice(str)
+	if not str or str == "" then return nil end
+	local cleanStr = str:gsub("[$,]", ""):lower()
+	if cleanStr:find("free") then return 0 end
+	local num = tonumber(cleanStr:match("[%d%.]+"))
+	if not num then return nil end
+	if cleanStr:find("k") then num = num * 1e3
+	elseif cleanStr:find("m") then num = num * 1e6
+	elseif cleanStr:find("b") then num = num * 1e9
+	elseif cleanStr:find("t") then num = num * 1e12
+	elseif cleanStr:find("qa") then num = num * 1e15
+	elseif cleanStr:find("qi") then num = num * 1e18 end
+	return num
+end
+
+local function parseProgress(text)
+	if string.find(string.upper(text), "COMPLETE") then return 100 end
+
+	local currentStr, maxStr = string.match(text, "([%d%,%.%a]+)%s*/%s*([%d%,%.%a]+)")
+	if currentStr and maxStr then
+		local current = parseSuffixValue(currentStr)
+		local max = parseSuffixValue(maxStr)
+		local leaderstats = localPlayer:FindFirstChild("leaderstats")
+		local cashVal = leaderstats and (leaderstats:FindFirstChild("Cash") or leaderstats:FindFirstChild("Money"))
+		if cashVal then
+			local rawCash = tonumber(cashVal.Value) or 0
+			if rawCash > current then current = rawCash end
+		end
+		if max > 0 then return math.clamp((current / max) * 100, 0, 100) end
+	end
+
+	local rawPercent = string.match(text, "(%d+%.?%d*)%%")
+	if rawPercent then return math.clamp(tonumber(rawPercent) or 0, 0, 100) end
+	return 0
+end
+
+local function monitorText(key, pathParts)
+	task.spawn(function()
+		local activeConnection
+		while running do
+			local obj = resolvePath(pathParts)
+			if obj then
+				local actualText
+				if obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox") then
+					actualText = obj.Text
+				elseif obj:IsA("StringValue") then
+					actualText = obj.Value
+				else
+					pcall(function() actualText = obj.Text end)
+				end
+
+				if actualText ~= nil then
+					trackedTexts[key] = tostring(actualText)
+					if not activeConnection then
+						local prop = obj:IsA("StringValue") and "Value" or "Text"
+						activeConnection = obj:GetPropertyChangedSignal(prop):Connect(function()
+							trackedTexts[key] = tostring(obj[prop])
+						end)
+					end
+				else
+					trackedTexts[key] = nil
+				end
+			else
+				if activeConnection then
+					activeConnection:Disconnect()
+					activeConnection = nil
+				end
+				trackedTexts[key] = nil
+			end
+			task.wait(CONFIG.Intervals.TextPoll)
+		end
+		if activeConnection then activeConnection:Disconnect() end
+	end)
+end
+
+for key, path in pairs(CONFIG.TrackedTexts) do monitorText(key, path) end
+
+--  aura highlights and the nametag thingy
+local function applyAuraEffect(character)
+	if not character or character:FindFirstChild("ExecutorAuraEffect") then return end
+	local A = CONFIG.Aura
+
+	new("Highlight", {
+		Name = "ExecutorAuraEffect", Adornee = character, FillTransparency = 1,
+		OutlineColor = State.colors.aura or A.OutlineColor, OutlineTransparency = 0,
+	}, character)
+
+	local head = character:WaitForChild("Head", 5)
+	if not head then return end
+
+	local billboard = new("BillboardGui", {
+		Name = "AuraTextGui", Size = UDim2.new(0, 200, 0, 50),
+		StudsOffset = Vector3.new(0, A.BobHeight, 0), AlwaysOnTop = true, Adornee = head,
+	})
+	local textLabel = new("TextLabel", {
+		Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Font = CONFIG.Font,
+		Text = State.nameText, TextSize = A.InitialTextSize, TextColor3 = State.colors.name or A.TextColor,
+		TextStrokeTransparency = 0, TextStrokeColor3 = A.StrokeColor,
+	}, billboard)
+	local glowLabel = new("TextLabel", {
+		Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Font = CONFIG.Font,
+		Text = State.nameText, TextSize = A.InitialTextSize, TextColor3 = A.GlowStart,
+		TextStrokeTransparency = 1, ZIndex = textLabel.ZIndex - 1,
+	}, billboard)
+	billboard.Parent = character
+	nametag.text, nametag.glow = textLabel, glowLabel
+
+	local startTime = tick()
+	local connection
+	connection = track(RunService.RenderStepped:Connect(function()
+		if not character.Parent or not billboard.Parent then
+			connection:Disconnect()
+			return
+		end
+		local elapsed = tick() - startTime
+		billboard.StudsOffset = Vector3.new(0, A.BobHeight + math.sin(elapsed * A.BobSpeed) * A.BobAmount, 0)
+		local pulse = (math.sin(elapsed * A.PulseSpeed) + 1) / 2
+		local nameColor = State.colors.name
+		local glowLow = nameColor and nameColor:Lerp(Color3.new(0, 0, 0), 0.7) or A.GlowPulseLow
+		glowLabel.TextColor3 = glowLow:Lerp(nameColor or A.GlowPulseHigh, pulse)
+		local scale = State.nameSize / A.BaseTextSize
+		billboard.Size = UDim2.new(0, 200 * scale, 0, 50 * scale)
+		local size = State.nameSize + math.sin(elapsed * A.ScaleSpeed) * 0.05 * 4
+		textLabel.TextSize = size
+		glowLabel.TextSize = size
+	end))
+end
+
+onCharacter(function(character)
+	character:WaitForChild("HumanoidRootPart")
+	applyAuraEffect(character)
+end)
+
+--  player animation bundle
+local ANIM_MAP = {
+	{ "idle", "Animation1", "idle1" }, { "idle", "Animation2", "idle2" },
+	{ "walk", "WalkAnim", "walk" },    { "run", "RunAnim", "run" },
+	{ "jump", "JumpAnim", "jump" },    { "fall", "FallAnim", "fall" },
+	{ "climb", "ClimbAnim", "climb" },
+}
+
+local function applyAnimations(character)
+	local animateScript = character:WaitForChild("Animate", 5)
+	if not animateScript then return end
+
+	for _, entry in ipairs(ANIM_MAP) do
+		local parent = animateScript:FindFirstChild(entry[1])
+		local anim = parent and parent:FindFirstChild(entry[2])
+		if anim and anim:IsA("Animation") then
+			anim.AnimationId = State.animations[entry[3]]
+		end
+	end
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		for _, playing in ipairs(humanoid:GetPlayingAnimationTracks()) do playing:Stop() end
+	end
+end
+
+onCharacter(applyAnimations)
+
+--  particle aura
+local EMITTER_BODY = {
+	Color = colorSeq({ 0, 255, 255, 255 }, { 0.2, 255, 205, 130 }, { 0.8, 255, 186, 37 }, { 1, 90, 62, 0 }),
+	Size = numSeq({ 0, 0.2 }, { 0.2, 1.1 }, { 0.8, 0.8 }, { 1, 0 }),
+	Transparency = numSeq({ 0, 0 }, { 0.3, 0.1 }, { 0.8, 0.3 }, { 1, 1 }),
+	Lifetime = NumberRange.new(0.15, 0.35), Rate = 50, Speed = NumberRange.new(2, 5),
+	Acceleration = Vector3.new(0, 1.5, 0), Drag = 0.5,
+	EmissionDirection = Enum.NormalId.Front, SpreadAngle = Vector2.new(180, 40),
+	RotSpeed = NumberRange.new(-500, 500), Rotation = NumberRange.new(0, 360),
+	VelocityInheritance = 0, Squash = numSeq({ 0, 1.5 }, { 0.5, -0.8 }, { 1, 0 }), LockedToPart = true,
+}
+
+local EMITTER_HAND = {
+	Color = colorSeq({ 0, 255, 212, 122 }, { 1, 255, 212, 122 }),
+	Transparency = numSeq({ 0, 0 }, { 0.4, 0.05 }, { 0.8, 0.25 }, { 1, 1 }),
+	Rate = 160, Size = numSeq({ 0, 0.3 }, { 0.2, 0.5 }, { 0.7, 0.5 }, { 1, 0 }),
+	Lifetime = NumberRange.new(0.25, 0.5), Speed = NumberRange.new(3, 7),
+}
+
+local SOUL_EMITTERS = {
+	{ "SSJ_SoulCore", {
+		Color = colorSeq({ 0, 255, 255, 255 }, { 0.5, 255, 205, 130 }, { 1, 255, 186, 37 }),
+		Size = numSeq({ 0, 0.2 }, { 0.5, 0.3 }, { 1, 0 }),
+		Transparency = numSeq({ 0, 0 }, { 0.7, 0.2 }, { 1, 1 }),
+		Lifetime = NumberRange.new(0.15, 0.25), Rate = 150, Speed = NumberRange.new(0, 0.1), LockedToPart = true,
+	} },
+	{ "SSJ_SoulRing", {
+		Color = colorSeq({ 0, 255, 249, 220 }, { 0.5, 255, 203, 60 }, { 1, 160, 122, 0 }),
+		Size = numSeq({ 0, 0.1 }, { 0.5, 0.45 }, { 1, 0 }),
+		Transparency = numSeq({ 0, 0.1 }, { 0.6, 0.4 }, { 1, 1 }),
+		Lifetime = NumberRange.new(0.2, 0.35), Rate = 90, Speed = NumberRange.new(0.5, 1), Drag = 2,
+		RotSpeed = NumberRange.new(180, 360), Rotation = NumberRange.new(0, 360), LockedToPart = true,
+	} },
+	{ "SSJ_SoulTrail", {
+		Color = colorSeq({ 0, 255, 205, 130 }, { 0.5, 255, 186, 37 }, { 1, 100, 73, 0 }),
+		Size = numSeq({ 0, 0.25 }, { 0.5, 0.15 }, { 1, 0 }),
+		Transparency = numSeq({ 0, 0.2 }, { 0.7, 0.6 }, { 1, 1 }),
+		Lifetime = NumberRange.new(0.3, 0.5), Rate = 100, Speed = NumberRange.new(0.1, 0.4), Drag = 1, LockedToPart = false,
+	} },
+	{ "SSJ_SoulSparks", {
+		Color = colorSeq({ 0, 255, 255, 255 }, { 0.5, 255, 205, 130 }, { 1, 255, 186, 37 }),
+		Size = numSeq({ 0, 0.08 }, { 0.5, 0.12 }, { 1, 0 }),
+		Transparency = numSeq({ 0, 0 }, { 0.8, 0.3 }, { 1, 1 }),
+		Lifetime = NumberRange.new(0.15, 0.3), Rate = 60, Speed = NumberRange.new(1, 2.5),
+		SpreadAngle = Vector2.new(180, 180), Drag = 3,
+	} },
+}
+
+local function makeEmitter(parent, name, overrides, extra)
+	local emitter = Instance.new("ParticleEmitter")
+	emitter.Name = name
+	emitter.Texture = CONFIG.SSJ.Texture
+	emitter.LightEmission = 0.6
+	emitter.LightInfluence = 0
+	for k, v in pairs(overrides) do emitter[k] = v end
+	if extra then
+		for k, v in pairs(extra) do emitter[k] = v end
+	end
+	emitter.Parent = parent
+	return emitter
+end
+
+-- orbit thingy for orbs
+local orbits = {}
+for _, o in ipairs(CONFIG.SSJ.Orbits) do
+	local axis = o.axis.Unit
+	local tangent = axis:Cross(Vector3.new(0, 1, 0))
+	if tangent.Magnitude < 0.001 then tangent = axis:Cross(Vector3.new(1, 0, 0)) end
+	tangent = tangent.Unit
+	orbits[#orbits + 1] = { speed = o.speed, offset = o.offset, tangent = tangent, bitangent = axis:Cross(tangent).Unit }
+end
+
+local function applyColors(only)
+	local colors = State.colors
+	local A, S = CONFIG.Aura, CONFIG.SSJ
+	local function wants(key) return only == nil or only == key end
+
+	if wants("name") and nametag.text and nametag.text.Parent then
+		nametag.text.TextColor3 = colors.name or A.TextColor
+	end
+
+	local character = localPlayer.Character
+	if not character then return end
+
+	if wants("aura") then
+		local highlight = character:FindFirstChild("ExecutorAuraEffect")
+		if highlight then highlight.OutlineColor = colors.aura or A.OutlineColor end
+
+		for _, partName in ipairs(S.BodyParts) do
+			local part = character:FindFirstChild(partName)
+			local emitter = part and part:FindFirstChild("SSJ_AuraParticles")
+			if emitter then
+				local base = (partName == "LeftHand" or partName == "RightHand") and EMITTER_HAND.Color or EMITTER_BODY.Color
+				emitter.Color = colors.aura and recolorSequence(base, colors.aura) or base
+			end
+		end
+	end
+
+	local hrp = character:FindFirstChild("HumanoidRootPart")
+	if not hrp then return end
+
+	if wants("orbs") or wants("light") then
+		local soulColors
+		if wants("orbs") then
+			soulColors = {}
+			for _, def in ipairs(SOUL_EMITTERS) do
+				soulColors[def[1]] = colors.orbs and recolorSequence(def[2].Color, colors.orbs) or def[2].Color
+			end
+		end
+
+		for _, att in ipairs(hrp:GetChildren()) do
+			if att.Name:sub(1, 9) == "SSJ_Soul_" then
+				if soulColors then
+					for emitterName, sequence in pairs(soulColors) do
+						local emitter = att:FindFirstChild(emitterName)
+						if emitter then emitter.Color = sequence end
+					end
+				end
+				if wants("light") then
+					local light = att:FindFirstChild("SSJ_SoulLight")
+					if light then light.Color = colors.light or S.LightColor end
+				end
+			end
+		end
+	end
+end
+
+local function createAura(character)
+	local S = CONFIG.SSJ
+	local hrp = character:WaitForChild("HumanoidRootPart", 5)
+	if not hrp then return end
+
+	if _G.SSJ_AuraConnection then
+		_G.SSJ_AuraConnection:Disconnect()
+		_G.SSJ_AuraConnection = nil
+	end
+
+	for _, child in ipairs(hrp:GetChildren()) do
+		local n = child.Name
+		if n == "SSJ_ChevronAura" or n == "SSJ_AuraAttachment" or n == "SSJ_OrbitFolder" or n:sub(1, 9) == "SSJ_Soul_" then
+			child:Destroy()
+		end
+	end
+
+	for _, partName in ipairs(S.BodyParts) do
+		local part = character:FindFirstChild(partName)
+		if part then
+			local old = part:FindFirstChild("SSJ_AuraParticles")
+			if old then old:Destroy() end
+			local isHand = partName == "LeftHand" or partName == "RightHand"
+			makeEmitter(part, "SSJ_AuraParticles", EMITTER_BODY, isHand and EMITTER_HAND or nil)
+		end
+	end
+
+	new("Folder", { Name = "SSJ_OrbitFolder" }, hrp)
+
+	local souls = {}
+	for i = 1, S.SoulCount do
+		local att = new("Attachment", { Name = "SSJ_Soul_" .. i }, hrp)
+		for _, def in ipairs(SOUL_EMITTERS) do makeEmitter(att, def[1], def[2]) end
+		new("PointLight", { Name = "SSJ_SoulLight", Color = S.LightColor, Brightness = S.LightBrightness, Range = S.LightRange }, att)
+		local orbit = orbits[((i - 1) % #orbits) + 1]
+		souls[i] = { att = att, orbit = orbit, phase = orbit.offset + ((i > #orbits and math.pi / 4) or 0) }
+	end
+
+	applyColors()
+
+	local angle = 0
+	local dashTable = {}
+	_G.SSJ_AuraConnection = RunService.Heartbeat:Connect(function(dt)
+		if not hrp.Parent then
+			_G.SSJ_AuraConnection:Disconnect()
+			_G.SSJ_AuraConnection = nil
+			return
+		end
+		angle = angle + dt * S.OrbitSpeed
+		if not S.PersistDash then table.clear(dashTable) end
+
+		for i, soul in ipairs(souls) do
+			local orbit = soul.orbit
+			local dash = dashTable[i]
+			if not dash then
+				dash = { active = false, startTime = 0, duration = 0, startAngle = 0, endAngle = 0, startRadius = S.OrbitRadius, targetRadius = S.OrbitRadius }
+				dashTable[i] = dash
+			end
+
+			local baseAngle = angle * orbit.speed + soul.phase
+
+			if not dash.active and math.random() < S.DashChance then
+				dash.active = true
+				dash.startTime = tick()
+				dash.duration = math.random(S.DashDuration[1], S.DashDuration[2]) / 100
+				dash.startAngle = baseAngle
+				dash.endAngle = baseAngle + (math.random() > 0.5 and 1 or -1) * (math.pi * 0.75)
+				dash.startRadius = S.OrbitRadius
+				dash.targetRadius = S.OrbitRadius * math.random(S.DashRadius[1], S.DashRadius[2]) / 100
+			end
+
+			local currentAngle, currentRadius = baseAngle, S.OrbitRadius
+			if dash.active then
+				local progress = math.clamp((tick() - dash.startTime) / dash.duration, 0, 1)
+				currentAngle = dash.startAngle + (dash.endAngle - dash.startAngle) * progress
+				currentRadius = dash.startRadius + (dash.targetRadius - dash.startRadius) * progress
+				if progress >= 1 then dash.active = false end
+			end
+
+			local pos = orbit.tangent * (math.cos(currentAngle) * currentRadius) + orbit.bitangent * (math.sin(currentAngle) * currentRadius)
+			soul.att.Position = Vector3.new(pos.X, pos.Y + 0.5, pos.Z)
+		end
+	end)
+end
+
+onCharacter(createAura)
+
+--  music thingy
+local Sound = Instance.new("Sound")
+Sound.SoundId = CONFIG.Music.SoundId
+Sound.Looped = CONFIG.Music.Looped
+Sound.Volume = CONFIG.Music.Volume
+Sound.Parent = workspace
+Sound:Play()
+
+--  GUI
+local ScreenGui = new("ScreenGui", { Name = CONFIG.GuiName })
+ScreenGui.Parent = CoreGui
+
+local W = CONFIG.Window
+
+local MainFrame = new("Frame", {
+	Name = "MainFrame", BackgroundColor3 = C.Background, Position = W.Position,
+	Size = W.Size, ClipsDescendants = true, Active = true,
+}, ScreenGui)
+addCorner(MainFrame, 8)
+addStroke(MainFrame, C.Stroke, 1.5)
+
+local Header = new("Frame", { Name = "Header", BackgroundColor3 = C.Header, Size = UDim2.new(1, 0, 0, W.HeaderHeight) }, MainFrame)
+addCorner(Header, 8)
+
+local Title = new("TextLabel", {
+	Name = "Title", BackgroundTransparency = 1, Position = UDim2.new(0, 10, 0, 0), Size = UDim2.new(1, -40, 1, 0),
+	Font = CONFIG.Font, RichText = true, Text = CONFIG.Title.Prefix .. "    " .. CONFIG.Title.Tag,
+	TextColor3 = C.Text, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left,
+}, Header)
+
+local MinimizeBtn = new("TextButton", {
+	Name = "MinimizeBtn", BackgroundTransparency = 1, Position = UDim2.new(1, -30, 0, 0), Size = UDim2.new(0, 30, 1, 0),
+	Font = CONFIG.Font, Text = "v", TextColor3 = C.Text, TextSize = 14,
+}, Header)
+
+local CategoryBar = new("ScrollingFrame", {
+	Name = "CategoryBar", BackgroundTransparency = 1, Position = UDim2.new(0, 5, 0, 33), Size = UDim2.new(1, -10, 0, 28),
+	CanvasSize = UDim2.new(0, 0, 0, 0), ScrollBarThickness = 2, AutomaticCanvasSize = Enum.AutomaticSize.X,
+}, MainFrame)
+new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 5) }, CategoryBar)
+
+local function makeButton(parent, name, text, bg)
+	local btn = new("TextButton", {
+		Name = name, BackgroundColor3 = bg or C.Panel, Size = UDim2.new(1, 0, 0, 25),
+		Font = CONFIG.Font, Text = text, TextColor3 = C.Text, TextSize = 12,
+	}, parent)
+	addCorner(btn, 6)
+	return btn
+end
+
+local function makeListPanel(name, height, scrolling)
+	local props = {
+		Name = name, BackgroundTransparency = 1, Position = UDim2.new(0, 10, 0, W.PanelY),
+		Size = UDim2.new(1, -20, 0, height), Visible = false,
+	}
+	if scrolling then
+		props.Size = UDim2.new(1, -20, 1, -(W.PanelY + W.PanelPadding))
+		props.BorderSizePixel = 0
+		props.CanvasSize = UDim2.new(0, 0, 0, 0)
+		props.ScrollBarThickness = 4
+		props.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	end
+	local panel = new(scrolling and "ScrollingFrame" or "Frame", props, MainFrame)
+	new("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 5) }, panel)
+	return panel
+end
+
+-- stats panel
+local PanelStats = new("Frame", {
+	Name = "PanelStats", BackgroundTransparency = 1, Position = UDim2.new(0, 0, 0, W.PanelY),
+	Size = UDim2.new(1, 0, 0, 170), Visible = true,
+}, MainFrame)
+
+local StatsLabel = new("TextLabel", {
+	Name = "StatsLabel", BackgroundTransparency = 1, Position = UDim2.new(0, 10, 0, 0), Size = UDim2.new(1, -20, 0, 45),
+	Font = CONFIG.Font, Text = "Stats:\nCash: $0\nPlot: Searching...", TextColor3 = C.On, TextSize = 13,
+	TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
+}, PanelStats)
+
+local RebirthContentFrame = new("Frame", {
+	Name = "RebirthContentFrame", BackgroundTransparency = 1, Position = UDim2.new(0, 0, 0, 50), Size = UDim2.new(1, 0, 0, 115),
+}, PanelStats)
+
+local function statLabel(name, y, height, text, color, size)
+	return new("TextLabel", {
+		Name = name, BackgroundTransparency = 1, Position = UDim2.new(0, 10, 0, y), Size = UDim2.new(1, -20, 0, height),
+		Font = CONFIG.Font, Text = text, TextColor3 = color, TextSize = size, TextWrapped = size == 12,
+	}, RebirthContentFrame)
+end
+
+local PercentLabel      = statLabel("PercentLabel", 2, 18, "0%", C.Text, 15)
+local RebirthLabel      = statLabel("RebirthLabel", 36, 16, "Progress: Loading...", C.TextMuted, 12)
+local CappedStatusLabel = statLabel("CappedStatusLabel", 54, 16, "Capped: Loading...", C.TextMuted, 12)
+local NumbersLabel      = statLabel("NumbersLabel", 72, 32, "Numbers: Loading...", C.TextMuted, 12)
+
+local ProgressBarBg = new("Frame", {
+	Name = "ProgressBarBg", BackgroundColor3 = C.Panel, BorderSizePixel = 0, Position = UDim2.new(0, 10, 0, 22),
+	Size = UDim2.new(1, -20, 0, 10), ClipsDescendants = true,
+}, RebirthContentFrame)
+addCorner(ProgressBarBg, 6)
+
+local ProgressBarFill = new("Frame", {
+	Name = "ProgressBarFill", BackgroundColor3 = C.Text, BorderSizePixel = 0, Size = UDim2.new(0, 0, 1, 0),
+}, ProgressBarBg)
+addCorner(ProgressBarFill, 6)
+
+local UIGradient = new("UIGradient", {
+	Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 0, 0)),
+		ColorSequenceKeypoint.new(0.2, Color3.fromRGB(255, 255, 0)),
+		ColorSequenceKeypoint.new(0.4, Color3.fromRGB(0, 255, 0)),
+		ColorSequenceKeypoint.new(0.6, Color3.fromRGB(0, 255, 255)),
+		ColorSequenceKeypoint.new(0.8, Color3.fromRGB(255, 0, 255)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 0, 0)),
+	}),
+}, ProgressBarFill)
+
+-- auto farm panel
+local PanelAutoFarm = makeListPanel("PanelAutoFarm", 200, true)
+local AutoBuyToggleBtn     = makeButton(PanelAutoFarm, "AutoBuyToggleBtn", "Auto Buy: ON", C.On)
+local MoveModeBtn          = makeButton(PanelAutoFarm, "MoveModeBtn", "Mode: Teleport")
+local AutoRebirthToggleBtn = makeButton(PanelAutoFarm, "AutoRebirthToggleBtn", "Auto Rebirth: ON", C.On)
+local RebirthModeBtn       = makeButton(PanelAutoFarm, "RebirthModeBtn", CONFIG.Rebirth.Modes[State.rebirthModeIndex].text)
+local BeamToggleBtn        = makeButton(PanelAutoFarm, "BeamToggleBtn", "Guidelines: OFF")
+local MerchantLocatorBtn   = makeButton(PanelAutoFarm, "MerchantLocatorBtn", "Merchant Locator: ON", C.On)
+local AutoPickToggleBtn    = makeButton(PanelAutoFarm, "AutoPickToggleBtn", "Auto Bits: ON", C.On)
+local ManualRebirthBtn     = makeButton(PanelAutoFarm, "ManualRebirthBtn", "Manual Rebirth")
+
+local MerchantsListFrame = new("Frame", {
+	Name = "MerchantsListFrame", BackgroundTransparency = 1, Size = UDim2.new(1, -20, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+	Position = UDim2.new(0, 10, 0, 155),
+}, PanelStats)
+new("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 3) }, MerchantsListFrame)
+local merchantListButtons = {}
+
+-- misc panels
+local PanelPlayer = makeListPanel("PanelPlayer", 200, true)
+local PanelAudio = makeListPanel("PanelAudio", 200)
+local PanelMisc = makeListPanel("PanelMisc", 200, true)
+
+local function makeInputRow(parent, name, labelText, initialText, commit, wide)
+	local boxScale = wide and 0.55 or 0.35
+	local boxX = 0.95 - boxScale
+	local row = new("Frame", { Name = name .. "Frame", BackgroundColor3 = C.Panel, Size = UDim2.new(1, 0, 0, 25) }, parent)
+	addCorner(row, 6)
+	new("TextLabel", {
+		Name = name .. "Label", BackgroundTransparency = 1, Size = UDim2.new(boxX, 0, 1, 0), Position = UDim2.new(0, 5, 0, 0),
+		Font = CONFIG.Font, Text = labelText, TextColor3 = C.Text, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left,
+	}, row)
+	local box = new("TextBox", {
+		Name = name .. "Input", BackgroundColor3 = C.Background, Size = UDim2.new(boxScale, 0, 0.8, 0), Position = UDim2.new(boxX, -5, 0.1, 0),
+		Font = CONFIG.Font, Text = initialText, TextColor3 = C.Text, TextSize = 14,
+		ClipsDescendants = true, ClearTextOnFocus = false,
+	}, row)
+	addCorner(box, 4)
+	box.FocusLost:Connect(function() commit(box) end)
+	return box
+end
+
+makeInputRow(PanelPlayer, "WalkSpeed", "WalkSpeed:", tostring(State.walkSpeed), function(box)
+	local val = tonumber(box.Text)
+	if val then State.walkSpeed = val else box.Text = tostring(State.walkSpeed) end
+end)
+
+makeInputRow(PanelPlayer, "JumpPower", "JumpPower:", tostring(State.jumpPower), function(box)
+	local val = tonumber(box.Text)
+	if val then State.jumpPower = val else box.Text = tostring(State.jumpPower) end
+end)
+
+local ANIM_ROWS = {
+	{ "idle1", "Idle 1:" }, { "idle2", "Idle 2:" }, { "walk", "Walk:" }, { "run", "Run:" },
+	{ "jump", "Jump:" }, { "fall", "Fall:" }, { "climb", "Climb:" },
+}
+
+local function animIdText(key)
+	return State.animations[key]:match("%d+") or ""
+end
+
+for _, row in ipairs(ANIM_ROWS) do
+	local key = row[1]
+	makeInputRow(PanelPlayer, "Anim_" .. key, row[2], animIdText(key), function(box)
+		local text = (box.Text:gsub("%s", ""))
+		if text:lower() == "default" then
+			State.animations[key] = CONFIG.Animations[key]
+		else
+			local digits = text:match("^rbxassetid://(%d+)$") or text:match("^(%d+)$")
+			if digits then State.animations[key] = "rbxassetid://" .. digits end
+		end
+		box.Text = animIdText(key)
+		if localPlayer.Character then task.spawn(applyAnimations, localPlayer.Character) end
+	end, true)
+end
+
+local function volumePercentText()
+	return tostring(math.floor(Sound.Volume * 100 + 0.5))
+end
+
+makeInputRow(PanelAudio, "MusicVolume", "Music Vol %:", volumePercentText(), function(box)
+	local pct = tonumber(box.Text)
+	if pct then
+		Sound.Volume = math.clamp(pct, 0, CONFIG.Music.MaxPercent) / 100
+	end
+	box.Text = volumePercentText()
+end)
+
+local function currentSoundIdText()
+	return Sound.SoundId:match("%d+") or ""
+end
+
+makeInputRow(PanelAudio, "MusicId", "Sound ID:", currentSoundIdText(), function(box)
+	local text = (box.Text:gsub("%s", ""))
+	local digits = text:match("^rbxassetid://(%d+)$") or text:match("^(%d+)$")
+	if digits and ("rbxassetid://" .. digits) ~= Sound.SoundId then
+		Sound.SoundId = "rbxassetid://" .. digits
+		Sound:Play()
+	end
+	box.Text = currentSoundIdText()
+end, true)
+
+makeInputRow(PanelMisc, "NameTag", "Name Tag:", State.nameText, function(box)
+	local text = box.Text:match("^%s*(.-)%s*$")
+	if text ~= "" then
+		State.nameText = text:sub(1, CONFIG.Aura.MaxNameLength)
+		if nametag.text and nametag.text.Parent then nametag.text.Text = State.nameText end
+		if nametag.glow and nametag.glow.Parent then nametag.glow.Text = State.nameText end
+	end
+	box.Text = State.nameText
+end, true)
+
+makeInputRow(PanelMisc, "NameSize", "Name Size:", tostring(State.nameSize), function(box)
+	local size = tonumber(box.Text)
+	if size then State.nameSize = math.clamp(size, CONFIG.Aura.MinNameSize, CONFIG.Aura.MaxNameSize) end
+	box.Text = tostring(State.nameSize)
+end)
+
+local function colorRowText(key)
+	return State.rgb[key] and "RGB" or colorToText(State.colors[key])
+end
+
+local function makeColorRow(name, labelText, key)
+	makeInputRow(PanelMisc, name, labelText, colorRowText(key), function(box)
+		local raw = (box.Text:gsub("%s", "")):lower()
+		if raw == "rgb" then
+			State.rgb[key] = true
+		else
+			local color, ok = parseColor(box.Text)
+			if ok then
+				State.rgb[key] = false
+				State.colors[key] = color
+				applyColors(key)
+			end
+		end
+		box.Text = colorRowText(key)
+	end)
+end
+
+makeColorRow("OrbColor", "Orb Color: (PUT RGB FOR RGB)", "orbs")
+makeColorRow("AuraColor", "Aura Color: (PUT RGB FOR RGB)", "aura")
+makeColorRow("LightColor", "Light Color: (PUT RGB FOR RGB)", "light")
+makeColorRow("NameColor", "Tag Color: (PUT RGB FOR RGB)", "name")
+
+makeInputRow(PanelMisc, "RgbSpeed", "RGB Speed:", tostring(State.rgbSpeed), function(box)
+	local speed = tonumber(box.Text)
+	if speed then State.rgbSpeed = math.clamp(speed, CONFIG.Rgb.MinSpeed, CONFIG.Rgb.MaxSpeed) end
+	box.Text = tostring(State.rgbSpeed)
+end)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+--  GUI stuff that makes it work :)
+local panels = { Stats = PanelStats, ["Auto Farm"] = PanelAutoFarm, Player = PanelPlayer, Audio = PanelAudio, Misc = PanelMisc }
+local tabOrder = { "Stats", "Auto Farm", "Player", "Audio", "Misc" }
+local tabButtons = {}
+
+local function refreshTabs()
+	for name, panel in pairs(panels) do
+		panel.Visible = (not State.isMinimized) and name == State.activeTab
+	end
+	for name, btn in pairs(tabButtons) do
+		local active = name == State.activeTab
+		btn.BackgroundColor3 = active and C.Accent or C.Panel
+		btn.TextColor3 = active and C.Text or C.TextDim
+	end
+end
+
+for _, name in ipairs(tabOrder) do
+	local btn = new("TextButton", { Name = name .. "Tab", Size = UDim2.new(0, 80, 1, 0), Font = CONFIG.Font, Text = name, TextSize = 12 }, CategoryBar)
+	addCorner(btn, 6)
+	addStroke(btn, C.Stroke, 1)
+	tabButtons[name] = btn
+	btn.MouseButton1Click:Connect(function()
+		State.activeTab = name
+		refreshTabs()
+	end)
+end
+refreshTabs()
+
+local function bindToggle(btn, label, stateKey, onColor)
+	btn.MouseButton1Click:Connect(function()
+		State[stateKey] = not State[stateKey]
+		local on = State[stateKey]
+		btn.BackgroundColor3 = on and onColor or C.Panel
+		btn.Text = label .. (on and ": ON" or ": OFF")
+	end)
+end
+
+bindToggle(BeamToggleBtn, "Guidelines", "beamsEnabled", C.On)
+bindToggle(AutoBuyToggleBtn, "Auto Buy", "autoBuyEnabled", C.On)
+bindToggle(AutoRebirthToggleBtn, "Auto Rebirth", "autoRebirthEnabled", C.On)
+bindToggle(AutoPickToggleBtn, "Auto Bits", "autoPickCardEnabled", C.On)
+bindToggle(MerchantLocatorBtn, "Merchant Locator", "merchantLocatorEnabled", C.On)
+
+MoveModeBtn.MouseButton1Click:Connect(function()
+	State.usePathfind = not State.usePathfind
+	MoveModeBtn.BackgroundColor3 = State.usePathfind and C.Accent or C.Panel
+	MoveModeBtn.Text = State.usePathfind and "Mode: Pathfind" or "Mode: Teleport"
+end)
+
+RebirthModeBtn.MouseButton1Click:Connect(function()
+	State.rebirthModeIndex = State.rebirthModeIndex % #CONFIG.Rebirth.Modes + 1
+	RebirthModeBtn.Text = CONFIG.Rebirth.Modes[State.rebirthModeIndex].text
+end)
+
+local dragging, dragInput, dragStart, startPos = false, nil, nil, nil
+
+Header.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		dragging = true
+		dragStart = input.Position
+		startPos = MainFrame.Position
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then dragging = false end
+		end)
+	end
+end)
+
+Header.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+		dragInput = input
+	end
+end)
+
+track(UserInputService.InputChanged:Connect(function(input)
+	if input == dragInput and dragging then
+		local delta = input.Position - dragStart
+		MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+	end
+end))
+
+MinimizeBtn.MouseButton1Click:Connect(function()
+	State.isMinimized = not State.isMinimized
+	local minimized = State.isMinimized
+	MainFrame.Size = minimized and UDim2.new(W.Size.X.Scale, W.Size.X.Offset, 0, W.MinimizedHeight) or W.Size
+	MinimizeBtn.Text = minimized and ">" or "v"
+	CategoryBar.Visible = not minimized
+	refreshTabs()
+end)
+
+
+--  "OH NO, AAAAAAUAUAUUAUAUAUA!!!" lythero if his movement fails.
+local speedConnection
+local originalMovement
+onCharacter(function(character)
+	local humanoid = character:WaitForChild("Humanoid", 5)
+	if not humanoid then return end
+	if speedConnection then speedConnection:Disconnect() end
+	originalMovement = originalMovement or { WalkSpeed = humanoid.WalkSpeed, JumpPower = humanoid.JumpPower, UseJumpPower = humanoid.UseJumpPower }
+
+	speedConnection = humanoid:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
+		if State.walkSpeed and humanoid.WalkSpeed ~= State.walkSpeed then
+			humanoid.WalkSpeed = State.walkSpeed
+		end
+	end)
+	humanoid.WalkSpeed = State.walkSpeed
+end)
+
+local function enforceMovement()
+	local character = localPlayer.Character
+	if not character then return end
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then return end
+	local root = character:FindFirstChild("HumanoidRootPart")
+
+	if humanoid.WalkSpeed ~= State.walkSpeed then humanoid.WalkSpeed = State.walkSpeed end
+	if humanoid.JumpPower ~= State.jumpPower then
+		humanoid.UseJumpPower = true
+		humanoid.JumpPower = State.jumpPower
+	end
+	if root and humanoid.MoveDirection.Magnitude > 0 and State.walkSpeed > CONFIG.Movement.BoostThreshold then
+		local moveDir = humanoid.MoveDirection
+		local vel = root.AssemblyLinearVelocity
+		root.AssemblyLinearVelocity = Vector3.new(moveDir.X * State.walkSpeed, vel.Y, moveDir.Z * State.walkSpeed)
+	end
+end
+
+--  queries
+local function getPlayerGui()
+	return localPlayer:FindFirstChild("PlayerGui")
+end
+
+local function getMyPlot()
+	local plots = Workspace:FindFirstChild("Plots")
+	if not plots then return "None" end
+	local myName, myDisplay = string.lower(localPlayer.Name), string.lower(localPlayer.DisplayName)
+	for _, plot in ipairs(plots:GetChildren()) do
+		local sign = plot:FindFirstChild("SignPlace")
+		local nameLabel = sign and sign:FindFirstChild("DefaultSign")
+		nameLabel = nameLabel and nameLabel:FindFirstChild("Screen")
+		nameLabel = nameLabel and nameLabel:FindFirstChild("SurfaceGui")
+		nameLabel = nameLabel and nameLabel:FindFirstChild("NameLabel")
+		if nameLabel and nameLabel:IsA("TextLabel") then
+			local text = string.lower(nameLabel.Text)
+			if text == myName or text == myDisplay then return plot.Name end
+		end
+	end
+	return "None"
+end
+
+local function getPlotSpawnCFrame(plotObj)
+	local offset = Vector3.new(0, CONFIG.Rebirth.PlotSpawnOffset, 0)
+	local spawnPad = plotObj:FindFirstChild("Spawn") or plotObj:FindFirstChild("SpawnLocation") or plotObj:FindFirstChild("ClaimPart")
+	if spawnPad and spawnPad:IsA("BasePart") then return spawnPad.CFrame + offset end
+	return plotObj:GetPivot() + offset
+end
+
+local essenceCache = { time = 0, value = false }
+local function isEssenceCapped()
+	local now = tick()
+	if now - essenceCache.time < CONFIG.Rebirth.EssenceScanCache then return essenceCache.value end
+	local phrase = CONFIG.Rebirth.EssencePhrase
+	local tracked = trackedTexts["EssenceCappedTemp"]
+	local capped = tracked ~= nil and string.find(string.lower(tracked), phrase, 1, true) ~= nil
+	if not capped then
+		local pGui = getPlayerGui()
+		if pGui then
+			for _, v in ipairs(pGui:GetDescendants()) do
+				if (v:IsA("TextLabel") or v:IsA("TextButton")) and v.Visible and string.find(string.lower(tostring(v.Text or "")), phrase, 1, true) then
+					capped = true
+					break
+				end
+			end
+		end
+	end
+	essenceCache.time, essenceCache.value = now, capped
+	return capped
+end
+
+local function getPlayerCash()
+	local playerGui = getPlayerGui()
+	if playerGui then
+		local system = playerGui:FindFirstChild("System")
+		local playerList = system and system:FindFirstChild("PlayerList")
+		local holder = playerList and playerList:FindFirstChild("Holder")
+		local myFrame = holder and holder:FindFirstChild(localPlayer.Name)
+		if myFrame then
+			for _, desc in ipairs(myFrame:GetDescendants()) do
+				if desc:IsA("TextLabel") and desc.Text ~= "" then
+					local parsed = parsePrice(desc.Text)
+					if parsed and parsed > 0 then return parsed, desc.Text end
+				end
+			end
+		end
+		for _, desc in ipairs(playerGui:GetDescendants()) do
+			if desc:IsA("TextLabel") and desc.Visible and desc.Parent and desc.Parent.Name == localPlayer.Name then
+				local parsed = parsePrice(desc.Text)
+				if parsed then return parsed, desc.Text end
+			end
+		end
+	end
+	local leaderstats = localPlayer:FindFirstChild("leaderstats") or localPlayer:FindFirstChild("stats")
+	if leaderstats then
+		local cashObj = leaderstats:FindFirstChild("Cash") or leaderstats:FindFirstChild("Money") or leaderstats:FindFirstChild("Coins")
+		if cashObj and cashObj:IsA("ValueBase") then
+			local val = tonumber(cashObj.Value) or 0
+			return val, "$" .. formatNumber(val)
+		end
+		for _, v in ipairs(leaderstats:GetChildren()) do
+			if v:IsA("ValueBase") and tonumber(v.Value) then
+				return tonumber(v.Value), "$" .. formatNumber(tonumber(v.Value))
+			end
+		end
+	end
+	return 0, "$0"
+end
+
+local function isButtonActive(btn)
+	if not btn or not btn.Parent then return false end
+	if btn:IsA("BasePart") and (btn.Transparency >= 1 or not btn.CanCollide) then return false end
+	local head = btn:FindFirstChild("Head") or btn:FindFirstChild("Part") or btn:FindFirstChildWhichIsA("BasePart")
+	if head and (head.Transparency >= 1 or not head.CanCollide) then return false end
+	local billboard = btn:FindFirstChildWhichIsA("BillboardGui", true)
+	if billboard and not billboard.Enabled then return false end
+	if btn:IsDescendantOf(ReplicatedStorage) or btn:IsDescendantOf(Lighting) then return false end
+	return true
+end
+
+local function getTargetPosition(target)
+	if target:IsA("BasePart") then return target.Position end
+	if target:IsA("Model") then
+		local head = target:FindFirstChild("Head") or target:FindFirstChild("Part") or target:FindFirstChildWhichIsA("BasePart")
+		return head and head.Position or target:GetPivot().Position
+	end
+	return nil
+end
+
+local function getButtonDetails(btn)
+	if not btn or not isButtonActive(btn) then return nil, nil, nil end
+	local priceNum, priceStr, buttonName = nil, nil, btn.Name
+	local nameDisplay = btn:FindFirstChild("NameDisplay", true)
+	if nameDisplay then
+		local textLabel = nameDisplay:FindFirstChildWhichIsA("TextLabel", true) or (nameDisplay:IsA("TextLabel") and nameDisplay)
+		if textLabel and textLabel.Text ~= "" and textLabel.Visible then buttonName = textLabel.Text end
+	end
+	local priceDisplay = btn:FindFirstChild("PriceDisplay", true)
+	if priceDisplay then
+		local textLabel = priceDisplay:FindFirstChildWhichIsA("TextLabel", true) or (priceDisplay:IsA("TextLabel") and priceDisplay)
+		if textLabel and textLabel.Text ~= "" and textLabel.Visible then
+			priceNum = parsePrice(textLabel.Text)
+			priceStr = textLabel.Text
+		end
+	end
+	if not priceNum then
+		for _, desc in ipairs(btn:GetDescendants()) do
+			if desc:IsA("TextLabel") and desc.Text ~= "" and desc.Visible then
+				local parsed = parsePrice(desc.Text)
+				if parsed then priceNum = parsed; priceStr = desc.Text; break end
+			end
+		end
+	end
+	if not priceNum and buttonName:lower():find("free") then priceNum, priceStr = 0, "Free" end
+	return priceNum, priceStr, buttonName
+end
+
+local function getClosestTycoon()
+	local myPlotName = getMyPlot()
+	if myPlotName == "None" then return nil end
+	local plots = Workspace:FindFirstChild("Plots")
+	local plotObj = plots and plots:FindFirstChild(myPlotName)
+	if not plotObj then return nil end
+	local function positionOf(obj)
+		if obj:IsA("Model") then return obj:GetPivot().Position end
+		local part = obj:FindFirstChildWhichIsA("BasePart")
+		return part and part.Position
+	end
+	local plotPos = positionOf(plotObj)
+	local tycoons = Workspace:FindFirstChild("Tycoons")
+	if not plotPos or not tycoons then return nil end
+	local closest, shortest = nil, math.huge
+	for _, tycoon in ipairs(tycoons:GetChildren()) do
+		if tycoon:FindFirstChild("Buttons") then
+			local pivot = positionOf(tycoon)
+			if pivot then
+				local dist = (plotPos - pivot).Magnitude
+				if dist < shortest then shortest, closest = dist, tycoon end
+			end
+		end
+	end
+	return closest
+end
+
+--  "i did that for movement!" said lythero in Dragon Ball FighterZ
+local activePathTask
+
+local function cancelPath()
+	if activePathTask then
+		task.cancel(activePathTask)
+		activePathTask = nil
+	end
+end
+
+local function moveToTarget(target)
+	local character = localPlayer.Character
+	if not character then return end
+	local root = character:FindFirstChild("HumanoidRootPart")
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not root or not humanoid then return end
+	local targetPos = getTargetPosition(target)
+	if not targetPos then return end
+	cancelPath()
+	if not State.usePathfind then
+		root.CFrame = CFrame.new(targetPos + Vector3.new(0, 3, 0))
+		return
+	end
+	local P = CONFIG.Pathfinding
+	activePathTask = task.spawn(function()
+		local path = PathfindingService:CreatePath({
+			AgentRadius = P.AgentRadius, AgentHeight = P.AgentHeight, AgentCanJump = P.AgentCanJump,
+			AgentCanClimb = P.AgentCanClimb, WaypointSpacing = P.WaypointSpacing,
+			Costs = { Water = P.WaterCost, Danger = math.huge },
+		})
+		local startedAt, lastJump = tick(), 0
+		local function aborted()
+			return not root.Parent or humanoid.Health <= 0 or not target.Parent or not isButtonActive(target)
+		end
+		local function jumpIfHigher()
+			local pos = getTargetPosition(target)
+			if pos and pos.Y - root.Position.Y > P.JumpHeightThreshold and tick() - lastJump >= P.JumpInterval then
+				lastJump = tick()
+				humanoid.Jump = true
+			end
+		end
+		local function fallbackTeleport()
+			if tick() - startedAt < P.FallbackSeconds then return false end
+			local pos = getTargetPosition(target)
+			if pos and (root.Position - pos).Magnitude > P.ReachDistance then
+				root.CFrame = CFrame.new(pos + Vector3.new(0, 3, 0))
+			end
+			return true
+		end
+		while true do
+			if aborted() or fallbackTeleport() then return end
+			targetPos = getTargetPosition(target)
+			if not targetPos then return end
+			jumpIfHigher()
+			if (root.Position - targetPos).Magnitude <= P.ReachDistance then
+				humanoid:MoveTo(targetPos)
+				task.wait(0.35)
+				continue
+			end
+			local ok = pcall(function() path:ComputeAsync(root.Position, targetPos) end)
+			if not ok or path.Status ~= Enum.PathStatus.Success then
+				humanoid:MoveTo(targetPos)
+				task.wait(0.45)
+				continue
+			end
+			local waypoints = path:GetWaypoints()
+			if #waypoints < 2 then
+				humanoid:MoveTo(targetPos)
+				task.wait(0.3)
+				continue
+			end
+			for i = 2, #waypoints do
+				if aborted() or fallbackTeleport() then return end
+				local wpPos = waypoints[i].Position
+				targetPos = getTargetPosition(target)
+				if not targetPos then return end
+				if (root.Position - targetPos).Magnitude <= P.ReachDistance then break end
+				humanoid:MoveTo(wpPos)
+				local startTime = tick()
+				local stuckCheck, stuckTimer = root.Position, 0
+				while (root.Position - wpPos).Magnitude > P.WaypointReach do
+					if aborted() or fallbackTeleport() then return end
+					targetPos = getTargetPosition(target)
+					if targetPos and (root.Position - targetPos).Magnitude <= P.ReachDistance then break end
+					if tick() - startTime > P.WaypointTimeout then break end
+					jumpIfHigher()
+					if (root.Position - stuckCheck).Magnitude < P.StuckDistance then
+						stuckTimer += 0.08
+						if stuckTimer > P.StuckTime then
+							local away = root.Position - wpPos
+							if away.Magnitude < 0.1 then away = Vector3.new(math.random(-1, 1), 0, math.random(-1, 1)) end
+							root.CFrame = root.CFrame + (away.Unit * P.StuckPush) + Vector3.new(0, P.StuckLift, 0)
+							stuckTimer = 0
+							stuckCheck = root.Position
+							task.wait(0.1)
+						end
+					else
+						stuckTimer = 0
+						stuckCheck = root.Position
+					end
+					task.wait(0.07)
+				end
+			end
+			task.wait(0.12)
+		end
+	end)
+end
+
+--  lines for both merchant and buttons you can buy :)
+local beams = {}
+local merchantBeams = {}
+
+local function destroyBeam(set, key)
+	local data = set[key]
+	if not data then return end
+	data.beam:Destroy(); data.att0:Destroy(); data.att1:Destroy()
+	set[key] = nil
+end
+
+local function clearBeams(set)
+	for key in pairs(set) do destroyBeam(set, key) end
+end
+
+local function clearGuidelines()
+	clearBeams(beams)
+end
+
+local function ensureBeam(set, key, root, targetPart, color)
+	if set[key] then return end
+	local G = CONFIG.Guidelines
+	local att0 = Instance.new("Attachment", root)
+	local att1 = Instance.new("Attachment", targetPart)
+	local beam = new("Beam", {
+		Attachment0 = att0, Attachment1 = att1, Color = ColorSequence.new(color or G.Color),
+		Width0 = G.Width, Width1 = G.Width, Texture = G.Texture, TextureMode = Enum.TextureMode.Wrap,
+		TextureSpeed = G.TextureSpeed, TextureLength = G.TextureLength, FaceCamera = true,
+		Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.1), NumberSequenceKeypoint.new(0.5, 0), NumberSequenceKeypoint.new(1, 0.1) }),
+	}, root)
+	set[key] = { beam = beam, att0 = att0, att1 = att1 }
+end
+
+local function updateGuidelines(validButtons)
+	if not State.beamsEnabled then return clearGuidelines() end
+	local character = localPlayer.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not root then return clearGuidelines() end
+	local G = CONFIG.Guidelines
+	local currentValid = {}
+	for _, item in ipairs(validButtons) do
+		if item.canAfford then
+			local btn = item.instance
+			currentValid[btn] = true
+			local targetPart = btn:IsA("BasePart") and btn
+				or (btn:IsA("Model") and (btn:FindFirstChild("Head") or btn:FindFirstChild("Part") or btn:FindFirstChildWhichIsA("BasePart") or btn.PrimaryPart))
+			if targetPart then
+				if (root.Position - targetPart.Position).Magnitude <= G.MaxDistance then
+					ensureBeam(beams, btn, root, targetPart)
+				else
+					destroyBeam(beams, btn)
+				end
+			end
+		end
+	end
+	for btn in pairs(beams) do
+		if not currentValid[btn] then destroyBeam(beams, btn) end
+	end
+end
+
+-- merchant fix for tracker
+local function getMerchantPart(shop)
+	local merchant = shop:FindFirstChild("Merchant")
+	if not merchant then return nil end
+	if merchant:IsA("BasePart") then return merchant end
+	if merchant:IsA("Model") then
+		local inner = merchant:FindFirstChild("Merchant")
+		if inner and inner:IsA("BasePart") then return inner end
+		if inner and inner:IsA("Model") then return inner.PrimaryPart or inner:FindFirstChildWhichIsA("BasePart", true) end
+	end
+	return nil
+end
+
+local function updateMerchantLocator()
+	if not State.merchantLocatorEnabled then return clearBeams(merchantBeams) end
+	local character = localPlayer.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	local bitsShops = Workspace:FindFirstChild("BitsShops")
+	if not root or not bitsShops then return clearBeams(merchantBeams) end
+	local M = CONFIG.MerchantLocator
+	local current = {}
+	for _, shop in ipairs(bitsShops:GetChildren()) do
+		local part = getMerchantPart(shop)
+		if part and part.Position.Y > M.MinY and (root.Position - part.Position).Magnitude <= M.MaxDistance then
+			current[part] = true
+			ensureBeam(merchantBeams, part, root, part, M.Color)
+		end
+	end
+	for part in pairs(merchantBeams) do
+		if not current[part] then destroyBeam(merchantBeams, part) end
+	end
+end
+
+--  merchant thingy
+local lastMerchantCheck = 0
+
+local function getShopPart(shop)
+	local head = shop:IsA("Model") and (shop:FindFirstChild("Merchant") or shop:FindFirstChild("Head") or shop:FindFirstChild("Part") or shop.PrimaryPart or shop:FindFirstChildWhichIsA("BasePart")) or shop
+	if not head then return nil end
+	return head:IsA("Model") and (head:FindFirstChild("Head") or head.PrimaryPart or head:FindFirstChildWhichIsA("BasePart")) or head
+end
+
+local function fireCardDetector(card)
+	local detector = card:FindFirstChildOfClass("ClickDetector") or card:FindFirstChild("ClickDetector", true)
+	if detector then
+		detector.MaxActivationDistance = math.huge
+		fireclickdetector(detector)
+	end
+end
+
+local function readCardTexts(card)
+	local surfaceGui = card:FindFirstChildWhichIsA("SurfaceGui", true)
+	if not surfaceGui then return "N/A", "N/A", nil end
+	local priceDisplay = surfaceGui:FindFirstChild("priceDisplay") or surfaceGui:FindFirstChild("oldpriceDisplay")
+	local bitsDisplay = surfaceGui:FindFirstChild("bitsDisplay") or surfaceGui:FindFirstChild("oldbitsDisplay")
+	local priceText, bitsText = "N/A", "N/A"
+	if priceDisplay and (priceDisplay:IsA("TextLabel") or priceDisplay:IsA("TextButton")) then priceText = priceDisplay.Text end
+	if bitsDisplay and (bitsDisplay:IsA("TextLabel") or bitsDisplay:IsA("TextButton")) then bitsText = bitsDisplay.Text end
+	return priceText, bitsText, bitsDisplay
+end
+
+local function highlightMerchants()
+	if tick() - lastMerchantCheck < CONFIG.Intervals.MerchantGate then return end
+	lastMerchantCheck = tick()
+	local activeCards = {}
+	local bitsShops = Workspace:FindFirstChild("BitsShops")
+	if bitsShops then
+		for _, shop in ipairs(bitsShops:GetChildren()) do
+			local targetPart = getShopPart(shop)
+			local tag = targetPart and targetPart:FindFirstChild("MerchantTag")
+			if tag then tag:Destroy() end
+			local cardsFolder = shop:FindFirstChild("Cards")
+			if cardsFolder then
+				for _, card in ipairs(cardsFolder:GetChildren()) do
+					if card:IsA("Model") or card:IsA("BasePart") then table.insert(activeCards, card) end
+				end
+			end
+		end
+	end
+	if State.autoPickCardEnabled and #activeCards >= CONFIG.AutoPickMinCards then
+		local bestCard, highestBits = nil, -1
+		for _, card in ipairs(activeCards) do
+			local _, _, bitsDisplay = readCardTexts(card)
+			if bitsDisplay and (bitsDisplay:IsA("TextLabel") or bitsDisplay:IsA("TextButton")) then
+				local bitsVal = parseSuffixValue(bitsDisplay.Text)
+				if bitsVal > highestBits then highestBits, bestCard = bitsVal, card end
+			end
+		end
+		if bestCard then fireCardDetector(bestCard) end
+	end
+	local currentValidCards = {}
+	for i, card in ipairs(activeCards) do
+		currentValidCards[card] = true
+		local btn = merchantListButtons[card]
+		if not btn then
+			btn = new("TextButton", {
+				Name = "CardEntry", Size = UDim2.new(1, 0, 0, 22), BackgroundColor3 = C.On, Font = CONFIG.Font,
+				TextSize = 11, TextColor3 = C.Text, TextWrapped = true,
+			}, MerchantsListFrame)
+			addCorner(btn, 6)
+			addStroke(btn, C.Stroke, 1)
+			merchantListButtons[card] = btn
+			btn.MouseButton1Click:Connect(function() fireCardDetector(card) end)
+		end
+		local priceText, bitsText = readCardTexts(card)
+		btn.Text = string.format("%s | %s | %s", card.Name, priceText, bitsText)
+		btn.LayoutOrder = i
+		btn.Visible = true
+	end
+	for item, btn in pairs(merchantListButtons) do
+		if not currentValidCards[item] then
+			btn:Destroy()
+			merchantListButtons[item] = nil
+		end
+	end
+end
+
+--  rebirth thingy
+local globalProgressLabel, globalCappedObj, globalNumbersLabel
+local lastNumbersText = ""
+
+local function rebirthPair(n) return string.format("(%d --> %d)", n, n + 1) end
+local function isBlank(s) return s == "" or s == "N/A" end
+
+local function checkCappedState()
+	if not globalCappedObj then
+		local playerGui = getPlayerGui()
+		local main = playerGui and playerGui:FindFirstChild("Main")
+		if main and main:FindFirstChild("Rebirth", true) then
+			globalCappedObj = main.Rebirth:FindFirstChild("Capped", true)
+		end
+		if not globalCappedObj then
+			local starterMain = StarterGui:FindFirstChild("Main")
+			if starterMain then globalCappedObj = starterMain:FindFirstChild("Capped", true) end
+		end
+	end
+	if not globalCappedObj then return false end
+	local targetObj = globalCappedObj
+	local playerGui = getPlayerGui()
+	if globalCappedObj:IsDescendantOf(StarterGui) and playerGui then
+		local relativePath = globalCappedObj:GetFullName():gsub("^StarterGui", "PlayerGui")
+		local found = playerGui
+		for part in relativePath:gmatch("[^%.]+") do
+			if part ~= "PlayerGui" then
+				found = found:FindFirstChild(part)
+				if not found then break end
+			end
+		end
+		if found then targetObj = found end
+	end
+	local current = targetObj
+	while current do
+		if current:IsA("GuiObject") and not current.Visible then return false end
+		if current:IsA("ScreenGui") then return current.Enabled end
+		current = current.Parent
+	end
+	return true
+end
+
+
+local function clickRebirthConfirm()
+	local gui = getPlayerGui() or localPlayer:WaitForChild("PlayerGui", 3)
+	if not gui then return end
+	local function realClick(btn)
+		local pos, size = btn.AbsolutePosition, btn.AbsoluteSize
+		local inset = GuiService:GetGuiInset()
+		local x = pos.X + size.X / 2
+		local y = pos.Y + size.Y / 2 + inset.Y
+		VirtualInputManager:SendMouseMoveEvent(x, y, game)
+		task.wait(0.02)
+		VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 1)
+		task.wait(0.05)
+		VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 1)
+	end
+	for _, v in ipairs(gui:GetDescendants()) do
+		if (v:IsA("TextButton") or v:IsA("ImageButton")) and v.Visible then
+			local nameCheck = string.upper(tostring(v.Name or ""))
+			local textCheck = string.upper(tostring(v.Text or ""))
+			if nameCheck == "REBIRTH" or nameCheck == "REBIRTHBUTTON" or string.find(textCheck, "REBIRTH") then
+				realClick(v)
+				break
+			end
+		end
+	end
+end
+
+local function triggerRebirth()
+	if not State.isRebirthing then
+		State.isRebirthing = true
+		task.spawn(function()
+			pcall(function()
+				local clickPart = resolvePath({ "Workspace", table.unpack(CONFIG.Rebirth.ObeliskPath) })
+				local detector = clickPart and clickPart:FindFirstChildOfClass("ClickDetector")
+				if detector then
+					detector.MaxActivationDistance = math.huge
+					fireclickdetector(detector)
+				end
+			end)
+			task.wait(CONFIG.Rebirth.ConfirmDelay)
+			pcall(clickRebirthConfirm)
+			task.wait(CONFIG.Rebirth.Cooldown)
+			State.isRebirthing = false
+		end)
+	end
+	if not State.isTeleportingPlot then
+		State.isTeleportingPlot = true
+		task.spawn(function()
+			task.wait(CONFIG.Rebirth.TeleportDelay)
+			pcall(function()
+				local myPlotName = getMyPlot()
+				local plots = Workspace:FindFirstChild("Plots")
+				local plotObj = myPlotName ~= "None" and plots and plots:FindFirstChild(myPlotName)
+				local root = localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart")
+				if plotObj and root then root.CFrame = getPlotSpawnCFrame(plotObj) end
+			end)
+			State.isTeleportingPlot = false
+		end)
+	end
+end
+
+local function updateMonitor()
+	local textVal = globalProgressLabel and globalProgressLabel.Text or ""
+	local rawNumbersVal = globalNumbersLabel and globalNumbersLabel.Text or ""
+	local numbersVal = rawNumbersVal
+
+	if not isBlank(rawNumbersVal) then
+		local current = tonumber(string.match(rawNumbersVal, "(%d+)"))
+		if current then numbersVal = rebirthPair(current) end
+	end
+
+	if isBlank(numbersVal) then
+		local leaderstats = localPlayer:FindFirstChild("leaderstats") or localPlayer:FindFirstChild("stats")
+		local rebirthVal = leaderstats and (leaderstats:FindFirstChild("Rebirths") or leaderstats:FindFirstChild("Rebirth") or leaderstats:FindFirstChild("Rank") or leaderstats:FindFirstChild("RebirthsCount"))
+		if rebirthVal then numbersVal = rebirthPair(tonumber(rebirthVal.Value) or 0) end
+	end
+
+	if isBlank(numbersVal) then
+		local pGui = getPlayerGui()
+		if pGui then
+			for _, v in ipairs(pGui:GetDescendants()) do
+				if v:IsA("TextLabel") and v.Visible then
+					local nameCheck = string.lower(v.Name)
+					if (string.find(nameCheck, "reb") or string.find(nameCheck, "rank")) and string.match(v.Text, "%d+") then
+						local num = tonumber(string.match(v.Text, "(%d+)"))
+						if num then numbersVal = rebirthPair(num); break end
+					end
+				end
+			end
+		end
+	end
+
+	if not isBlank(numbersVal) then
+		if lastNumbersText == "" then
+			lastNumbersText = numbersVal
+		elseif numbersVal ~= lastNumbersText then
+			local oldFrom = string.match(lastNumbersText, "%((%d+)%s*%-%->%s*%d+%)")
+			local newFrom = string.match(numbersVal, "%((%d+)%s*%-%->%s*%d+%)")
+			if oldFrom and newFrom and tonumber(newFrom) > tonumber(oldFrom) then lastNumbersText = numbersVal end
+		end
+	end
+
+	local displayNumbers = (not isBlank(numbersVal)) and numbersVal or (lastNumbersText ~= "" and lastNumbersText or "N/A")
+	local isCappedVisible = checkCappedState()
+
+	RebirthLabel.Text = "Progress: " .. (textVal ~= "" and textVal or "N/A")
+	CappedStatusLabel.Text = "Capped: " .. (isCappedVisible and "TRUE" or "FALSE")
+	NumbersLabel.Text = "Rebirth(s): " .. displayNumbers
+
+	local percent = parseProgress(textVal ~= "" and textVal or displayNumbers)
+
+	if State.autoRebirthEnabled then
+		local rebirthNotiText = trackedTexts["RebirthNotification"]
+		local hasRebirthNoti = rebirthNotiText ~= nil and rebirthNotiText ~= "" and rebirthNotiText ~= "N/A"
+		local mode = CONFIG.Rebirth.Modes[State.rebirthModeIndex].id
+		local shouldRebirth
+		if mode == "Any" then
+			shouldRebirth = isEssenceCapped() or hasRebirthNoti
+		elseif mode == "Essence" then
+			shouldRebirth = isEssenceCapped()
+		else
+			shouldRebirth = hasRebirthNoti
+		end
+		if shouldRebirth then triggerRebirth() end
+	end
+
+	PercentLabel.Text = string.format("%.1f%%", percent)
+
+	UIGradient.Rotation = 0
+	if isCappedVisible then
+		State.isCompleteRGB = true
+	else
+		State.isCompleteRGB = false
+		if (State.autoRebirthEnabled and percent >= 100) or percent >= 99 then
+			UIGradient.Color = ColorSequence.new(C.On)
+		else
+			UIGradient.Color = ColorSequence.new(Color3.fromRGB(255, 0, 0):Lerp(C.On, percent / 100))
+		end
+	end
+
+	ProgressBarFill:TweenSize(UDim2.new(percent / 100, 0, 1, 0), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.2, true)
+end
+
+local function notify(title, text, duration)
+	pcall(function()
+		StarterGui:SetCore("SendNotification", { Title = title, Text = text, Duration = duration })
+	end)
+end
+
+-- manual rebirth thingy
+ManualRebirthBtn.MouseButton1Click:Connect(function()
+	local progressText = globalProgressLabel and globalProgressLabel.Text or ""
+	local rebirthNotiText = trackedTexts["RebirthNotification"]
+	local hasRebirthNoti = rebirthNotiText ~= nil and rebirthNotiText ~= "" and rebirthNotiText ~= "N/A"
+	if parseProgress(progressText) >= 100 or hasRebirthNoti then
+		triggerRebirth()
+	else
+		notify(CONFIG.Rebirth.ManualTitle, CONFIG.Rebirth.ManualFailText, CONFIG.Rebirth.ManualFailSeconds)
+	end
+end)
+
+task.spawn(function()
+	local textConn, cappedConn, numbersConn, leaderConn
+	cleanupHooks[#cleanupHooks + 1] = function()
+		for _, conn in ipairs({ textConn, cappedConn, numbersConn, leaderConn }) do
+			if conn then conn:Disconnect() end
+		end
+	end
+	local function hookMonitor(gui)
+		if textConn then textConn:Disconnect() textConn = nil end
+		if cappedConn then cappedConn:Disconnect() cappedConn = nil end
+		if numbersConn then numbersConn:Disconnect() numbersConn = nil end
+		pcall(function()
+			globalProgressLabel = gui:WaitForChild("System", 2):WaitForChild("RebirthProgress", 2):WaitForChild("Progress", 2):WaitForChild("TextLabel", 2)
+		end)
+		pcall(function()
+			local rebirthFrame = gui:FindFirstChild("Main") and gui.Main:FindFirstChild("Rebirth")
+			if rebirthFrame then globalCappedObj = rebirthFrame:FindFirstChild("Capped", true) end
+			if not globalCappedObj then
+				local starterRebirth = StarterGui:FindFirstChild("Main") and StarterGui.Main:FindFirstChild("Rebirth")
+				if starterRebirth then globalCappedObj = starterRebirth:FindFirstChild("Capped", true) end
+			end
+		end)
+		pcall(function()
+			local holder = gui:WaitForChild("System", 2):WaitForChild("PlayerList", 2):WaitForChild("Holder", 2)
+			local myHolder = holder:FindFirstChild(localPlayer.Name) or holder:FindFirstChildWhichIsA("Frame")
+			if myHolder then globalNumbersLabel = myHolder:WaitForChild("RebsText", 2) end
+		end)
+		pcall(function()
+			if not globalNumbersLabel then
+				local rebirthFrame = gui:FindFirstChild("Main") and gui.Main:FindFirstChild("Rebirth")
+				if rebirthFrame then globalNumbersLabel = rebirthFrame:FindFirstChild("Numbers", true) end
+			end
+		end)
+		if globalProgressLabel then textConn = globalProgressLabel:GetPropertyChangedSignal("Text"):Connect(updateMonitor) end
+		if globalCappedObj then cappedConn = globalCappedObj:GetPropertyChangedSignal("Visible"):Connect(updateMonitor) end
+		if globalNumbersLabel then numbersConn = globalNumbersLabel:GetPropertyChangedSignal("Text"):Connect(updateMonitor) end
+		local leaderstats = localPlayer:FindFirstChild("leaderstats") or localPlayer:FindFirstChild("stats")
+		local cashVal = leaderstats and (leaderstats:FindFirstChild("Cash") or leaderstats:FindFirstChild("Money"))
+		if cashVal then
+			if leaderConn then leaderConn:Disconnect() end
+			leaderConn = cashVal:GetPropertyChangedSignal("Value"):Connect(updateMonitor)
+		end
+		updateMonitor()
+	end
+	hookMonitor(localPlayer:WaitForChild("PlayerGui"))
+	track(localPlayer.CharacterAdded:Connect(function()
+		task.wait(1)
+		if running then hookMonitor(localPlayer:WaitForChild("PlayerGui")) end
+	end))
+	while running do
+		task.wait(CONFIG.Intervals.MonitorPoll)
+		if running then updateMonitor() end
+	end
+end)
+
+-- autobuy settings thingy (fixed this up)
+local existingUIButtons = {}
+local lastAutoBuyTime = 0
+
+local function clearShopList()
+	for _, uiBtn in pairs(existingUIButtons) do uiBtn:Destroy() end
+	table.clear(existingUIButtons)
+	clearGuidelines()
+end
+
+local function updateShop()
+	local cashNum, cashStr = getPlayerCash()
+	local currentPlot = getMyPlot()
+
+	StatsLabel.Text = string.format("Stats:\nCash: %s\nPlot: %s\nEssence Capped: %s", cashStr or tostring(cashNum), currentPlot, isEssenceCapped() and "True" or "False")
+
+	local closestTycoon = getClosestTycoon()
+	if not closestTycoon or not closestTycoon:FindFirstChild("Buttons") then
+		clearShopList()
+		return
+	end
+
+	local affordable, unaffordable, allItems = {}, {}, {}
+	for _, btn in ipairs(closestTycoon.Buttons:GetChildren()) do
+		local priceNum, priceStr, displayName = getButtonDetails(btn)
+		if priceNum then
+			local item = {
+				instance = btn, name = displayName or btn.Name, price = priceNum,
+				priceStr = priceStr or tostring(priceNum), canAfford = cashNum >= priceNum,
+			}
+			table.insert(allItems, item)
+			table.insert(item.canAfford and affordable or unaffordable, item)
+		end
+	end
+
+	local function byPrice(a, b) return a.price < b.price end
+	table.sort(affordable, byPrice)
+	table.sort(unaffordable, byPrice)
+
+	if State.autoBuyEnabled and currentPlot ~= "None" and localPlayer.Character then
+		if #affordable > 0 and tick() - lastAutoBuyTime >= CONFIG.Intervals.AutoBuyCooldown then
+			lastAutoBuyTime = tick()
+			moveToTarget(affordable[1].instance)
+		end
+	end
+
+	local currentValid = {}
+	local order = 1
+	local function processList(list)
+		for _, item in ipairs(list) do
+			currentValid[item.instance] = true
+			local itemBtn = existingUIButtons[item.instance]
+			if not itemBtn then
+				itemBtn = new("TextButton", { Name = item.name, Size = UDim2.new(1, 0, 0, 32), Font = CONFIG.Font, TextWrapped = true }, MainFrame)
+				itemBtn.Visible = false  -- tracked but never rendered
+				addCorner(itemBtn, 6)
+				addStroke(itemBtn, C.Stroke, 1)
+				existingUIButtons[item.instance] = itemBtn
+			end
+			itemBtn.LayoutOrder = order
+			itemBtn.Text = item.name .. " (" .. item.priceStr .. ")"
+			itemBtn.BackgroundColor3 = item.canAfford and C.On or C.Danger
+			itemBtn.TextColor3 = C.Text
+			if itemBtn._conn then itemBtn._conn:Disconnect() end
+			itemBtn._conn = itemBtn.MouseButton1Click:Connect(function()
+				if item.canAfford then moveToTarget(item.instance) end
+			end)
+			order += 1
+		end
+	end
+	processList(affordable)
+	processList(unaffordable)
+
+	for btn, uiBtn in pairs(existingUIButtons) do
+		if not currentValid[btn] then
+			if uiBtn._conn then uiBtn._conn:Disconnect() end
+			uiBtn:Destroy()
+			existingUIButtons[btn] = nil
+		end
+	end
+	updateGuidelines(allItems)
+end
+
+--  scheduler
+local gradientOffset = 0
+
+local scheduled = {
+	{ interval = CONFIG.Intervals.MovementCheck, last = 0, fn = enforceMovement },
+	{ interval = CONFIG.Intervals.GradientSpin, last = 0, fn = function()
+		if not State.isCompleteRGB then return end
+		gradientOffset = (gradientOffset + 0.02) % 1
+		local keys = {}
+		for i = 0, 5 do
+			local t = i / 5
+			keys[#keys + 1] = ColorSequenceKeypoint.new(t, Color3.fromHSV((t + gradientOffset) % 1, 1, 1))
+		end
+		UIGradient.Color = ColorSequence.new(keys)
+	end },
+	{ interval = CONFIG.Intervals.RgbUpdate, last = 0, fn = function(now)
+		local period = CONFIG.Rgb.CycleSeconds / State.rgbSpeed
+		local rgb = Color3.fromHSV((now % period) / period, 1, 1)
+		Title.Text = string.format('%s  <font color="rgb(%d,%d,%d)">%s</font>',
+			CONFIG.Title.Prefix, math.floor(rgb.R * 255), math.floor(rgb.G * 255), math.floor(rgb.B * 255), CONFIG.Title.Tag)
+		for key, on in pairs(State.rgb) do
+			if on then
+				State.colors[key] = rgb
+				applyColors(key)
+			end
+		end
+	end },
+	{ interval = CONFIG.Intervals.MerchantUpdate, last = 0, fn = highlightMerchants },
+	{ interval = CONFIG.Intervals.ShopUpdate, last = 0, fn = updateShop },
+	{ interval = CONFIG.Intervals.MerchantLocator, last = 0, fn = updateMerchantLocator },
+}
+
+track(RunService.Heartbeat:Connect(function()
+	local now = tick()
+	for _, job in ipairs(scheduled) do
+		if now - job.last >= job.interval then
+			job.last = now
+			job.fn(now)
+		end
+	end
+end))
+
+--  anti afk
+if CONFIG.AntiAfk.Enabled then
+	track(localPlayer.Idled:Connect(function()
+		VirtualUser:Button2Down(Vector2.new(0, 0), Workspace.CurrentCamera.CFrame)
+		task.wait(1)
+		VirtualUser:Button2Up(Vector2.new(0, 0), Workspace.CurrentCamera.CFrame)
+	end))
+	pcall(function()
+		StarterGui:SetCore("SendNotification", {
+			Title = CONFIG.AntiAfk.NotifyTitle,
+			Text = CONFIG.AntiAfk.NotifyText,
+			Duration = CONFIG.AntiAfk.NotifyDuration,
+		})
+	end)
+end
+
+--  fix on re-exec
+local function clearAuras(character)
+	for _, name in ipairs({ "ExecutorAuraEffect", "AuraTextGui" }) do
+		local obj = character:FindFirstChild(name)
+		if obj then obj:Destroy() end
+	end
+	for _, partName in ipairs(CONFIG.SSJ.BodyParts) do
+		local part = character:FindFirstChild(partName)
+		local emitter = part and part:FindFirstChild("SSJ_AuraParticles")
+		if emitter then emitter:Destroy() end
+	end
+	local hrp = character:FindFirstChild("HumanoidRootPart")
+	if hrp then
+		for _, child in ipairs(hrp:GetChildren()) do
+			local n = child.Name
+			if n == "SSJ_OrbitFolder" or n:sub(1, 9) == "SSJ_Soul_" then child:Destroy() end
+		end
+	end
+end
+
+env.TycoonManagerCleanup = function()
+	running = false
+	for _, connection in ipairs(connections) do connection:Disconnect() end
+	table.clear(connections)
+	if speedConnection then speedConnection:Disconnect() speedConnection = nil end
+	if _G.SSJ_AuraConnection then
+		_G.SSJ_AuraConnection:Disconnect()
+		_G.SSJ_AuraConnection = nil
+	end
+	for _, hook in ipairs(cleanupHooks) do pcall(hook) end
+	table.clear(cleanupHooks)
+	pcall(cancelPath)
+	pcall(clearGuidelines)
+	pcall(clearBeams, merchantBeams)
+	local character = localPlayer.Character
+	if character then
+		pcall(clearAuras, character)
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		if humanoid and originalMovement then
+			humanoid.WalkSpeed = originalMovement.WalkSpeed
+			humanoid.UseJumpPower = originalMovement.UseJumpPower
+			humanoid.JumpPower = originalMovement.JumpPower
+		end
+	end
+	ScreenGui:Destroy()
+	Sound:Stop()
+	Sound:Destroy()
+	env.TycoonManagerCleanup = nil
+end
